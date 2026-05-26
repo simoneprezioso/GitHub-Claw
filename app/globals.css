@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-ink-50 text-ink-900 font-sans antialiased;
+}
+
+/* Reduce the harshness of focus rings on the search input while keeping
+   keyboard accessibility. */
+:focus-visible {
+  @apply outline-none ring-2 ring-ink-900/70 ring-offset-2 ring-offset-ink-50;
+}
+
+/* Loading shimmer used by skeleton cards. */
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, #ececef 0%, #f7f7f8 40%, #ececef 80%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
