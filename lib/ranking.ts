@@ -5,6 +5,7 @@
 import type {
   GitHubRepo,
   HealthBadge,
+  Maintenance,
   RankedRepo,
   ScoreBreakdown,
   SortMode,
@@ -18,34 +19,54 @@ import {
   uniq,
 } from "./utils";
 
-// Phrases that strongly suggest the repo is a learning/curated resource
-// rather than an actual usable project.
-const TUTORIAL_PATTERNS: Array<{ kind: "tutorial" | "awesome"; re: RegExp }> = [
-  { kind: "awesome", re: /\bawesome[- ]list\b/i },
-  { kind: "awesome", re: /\bawesome\b/i },
-  { kind: "awesome", re: /\bcurated list\b/i },
-  { kind: "tutorial", re: /\btutorial\b/i },
-  { kind: "tutorial", re: /\blearning\b/i },
-  { kind: "tutorial", re: /\bcourse\b/i },
-  { kind: "tutorial", re: /\bexample(s)?\b/i },
-  { kind: "tutorial", re: /\bboilerplate\b/i },
-  { kind: "tutorial", re: /\bstarter\b/i },
-  { kind: "tutorial", re: /\bdemo\b/i },
-  { kind: "tutorial", re: /\bcheat[- ]?sheet\b/i },
+// Curated-list ("awesome") detection. The old bare /\bawesome\b/ fired on any
+// repo that merely had "awesome" in its description (a very common adjective),
+// nuking real libraries. We now require an actual list signal or the canonical
+// `awesome-` repo-name prefix.
+const AWESOME_PATTERNS: RegExp[] = [
+  /\bawesome[- ]list\b/i,
+  /\bcurated (list|collection)\b/i,
+];
+const AWESOME_NAME_PREFIX = /^awesome[-_]/i;
+
+// Tutorial/learning signals strong enough to match anywhere (name/desc/topics).
+// Note: we deliberately do NOT match bare /\blearning\b/ — it flagged every
+// machine-learning project as a tutorial. We require an instructional phrasing.
+const TUTORIAL_TEXT_PATTERNS: RegExp[] = [
+  /\btutorial\b/i,
+  /\bcourse\b/i,
+  /\bcheat[- ]?sheet\b/i,
+  /\blearn (to|how|by|the|web|react|python|rust|go|js|javascript)\b/i,
+  /\blearning resources?\b/i,
+];
+
+// Weak signals that are only meaningful in the NAME or TOPICS — never the
+// description. A real, usable product routinely says "live demo", "example
+// usage", or "getting started" in its description; that must not penalise it.
+const TUTORIAL_NAMEY_PATTERNS: RegExp[] = [
+  /\bexamples?\b/i,
+  /\bboilerplate\b/i,
+  /\bstarter\b/i,
+  /\bdemo\b/i,
+  /\bsample\b/i,
+  /\bplayground\b/i,
+  /\bgetting[- ]started\b/i,
+  /\bskeleton\b/i,
 ];
 
 function detectTutorialFlags(repo: GitHubRepo): { tutorial: boolean; awesome: boolean } {
-  const blob = [repo.name, repo.full_name, repo.description ?? "", ...(repo.topics ?? [])]
+  const anywhere = [repo.name, repo.full_name, repo.description ?? "", ...(repo.topics ?? [])]
     .join(" ")
     .toLowerCase();
-  let tutorial = false;
-  let awesome = false;
-  for (const p of TUTORIAL_PATTERNS) {
-    if (p.re.test(blob)) {
-      if (p.kind === "awesome") awesome = true;
-      else tutorial = true;
-    }
-  }
+  // Name + topics only — excludes the description on purpose.
+  const nameTopics = [repo.name, ...(repo.topics ?? [])].join(" ").toLowerCase();
+
+  const awesome =
+    AWESOME_NAME_PREFIX.test(repo.name) || AWESOME_PATTERNS.some((re) => re.test(anywhere));
+  const tutorial =
+    TUTORIAL_TEXT_PATTERNS.some((re) => re.test(anywhere)) ||
+    TUTORIAL_NAMEY_PATTERNS.some((re) => re.test(nameTopics));
+
   return { tutorial, awesome };
 }
 
@@ -194,6 +215,48 @@ function buildWarnings(repo: GitHubRepo, flags: { tutorial: boolean; awesome: bo
   return w;
 }
 
+// Headline maintenance triage. Every verdict is derived from live, fetched
+// GitHub metadata (push date, archive flag, license, fork flag, stars) — never
+// invented. This is the trust wedge: an LLM can hallucinate a repo or its
+// health; we only ever report what the API actually returned.
+function assessMaintenance(
+  repo: GitHubRepo,
+  flags: { tutorial: boolean; awesome: boolean },
+): Maintenance {
+  const months = monthsSince(repo.pushed_at);
+  const hasLicense = Boolean(
+    repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION",
+  );
+
+  // Abandoned — hard stops.
+  if (repo.archived) {
+    return { verdict: "Abandoned", reasons: ["Archived by its owner — read-only"] };
+  }
+  if (isFinite(months) && months > 24) {
+    return { verdict: "Abandoned", reasons: ["No commits in over 2 years"] };
+  }
+
+  // Risky — usable, but caveat emptor.
+  const risky: string[] = [];
+  if (isFinite(months) && months > 12) risky.push("No commits in over a year");
+  if (repo.fork) risky.push("This is a fork, not the upstream project");
+  if (!hasLicense) risky.push("No open-source license — usage rights unclear");
+  if (flags.awesome) risky.push("Looks like a curated list, not a usable project");
+  if (flags.tutorial) risky.push("Looks like a tutorial/demo, not a product");
+  if (risky.length > 0) return { verdict: "Risky", reasons: risky };
+
+  // Adopt — recent, licensed, no red flags.
+  const reasons: string[] = [];
+  if (isFinite(months) && months <= 3) reasons.push("Actively maintained (pushed within 3 months)");
+  else if (isFinite(months) && months <= 12) reasons.push("Maintained within the past year");
+  if (hasLicense) reasons.push(`Licensed (${repo.license!.spdx_id})`);
+  if (repo.stargazers_count >= 100) reasons.push("Established user base");
+  return {
+    verdict: "Adopt",
+    reasons: reasons.length > 0 ? reasons : ["Recent activity, no red flags"],
+  };
+}
+
 function buildExplanation(repo: GitHubRepo, matchedTerms: string[]): string {
   // Sources we can honestly cite. We do NOT fabricate README content.
   const sources: string[] = [];
@@ -277,7 +340,10 @@ export function rankRepos(input: RankInputs): RankedRepo[] {
         fork: repo.fork,
         openIssues: repo.open_issues_count,
         score,
+        // Keep the unclamped, unrounded raw for tie-breaking (see compareRanked).
+        rawScore: round1(raw),
         scoreBreakdown: breakdown,
+        maintenance: assessMaintenance(repo, flags),
         badges: buildBadges(repo, flags),
         warnings: buildWarnings(repo, flags),
         whyMatched: buildExplanation(repo, matched),
@@ -300,19 +366,42 @@ export function rankRepos(input: RankInputs): RankedRepo[] {
     });
 
   // Sort.
-  switch (filters.sort) {
+  sortRanked(ranked, filters.sort);
+
+  return ranked;
+}
+
+// Single source of truth for relevance ordering, reused at every sort site
+// (initial rank, post-README re-sort, embedding rerank) so they never disagree.
+// Integer `score` first, then the fractional `rawScore` (this is what makes a
+// 42.8 outrank a 42.1 that both display as 42, and keeps two penalty-floored
+// "0" repos ordered by their true raw quality), then text relevance, then stars
+// last — so a tangential megaproject can no longer win a tie over an exact match.
+export function compareRanked(a: RankedRepo, b: RankedRepo): number {
+  return (
+    b.score - a.score ||
+    b.rawScore - a.rawScore ||
+    b.scoreBreakdown.textRelevance - a.scoreBreakdown.textRelevance ||
+    b.stars - a.stars
+  );
+}
+
+export function sortRanked(ranked: RankedRepo[], sort: SortMode): void {
+  switch (sort) {
     case "stars":
-      ranked.sort((a, b) => b.stars - a.stars);
+      ranked.sort((a, b) => b.stars - a.stars || compareRanked(a, b));
       break;
     case "recent":
-      ranked.sort((a, b) => new Date(b.pushedAt).getTime() - new Date(a.pushedAt).getTime());
+      ranked.sort(
+        (a, b) =>
+          new Date(b.pushedAt).getTime() - new Date(a.pushedAt).getTime() ||
+          compareRanked(a, b),
+      );
       break;
     case "relevance":
     default:
-      ranked.sort((a, b) => b.score - a.score || b.stars - a.stars);
+      ranked.sort(compareRanked);
   }
-
-  return ranked;
 }
 
 // Pull the set of unique languages out of a result list for the filter dropdown.
@@ -320,6 +409,38 @@ export function uniqueLanguages(repos: RankedRepo[]): string[] {
   const set = new Set<string>();
   for (const r of repos) if (r.language) set.add(r.language);
   return Array.from(set).sort();
+}
+
+// Client-side display filtering + sorting over an already-ranked result set.
+// The API now returns the full unfiltered pool so toggling hide-archived /
+// hide-forks / hide-tutorials / language / sort is instant and costs zero
+// GitHub API calls (the old code re-fetched on every toggle). Tutorial/awesome
+// detection reuses the badges already computed server-side.
+export function applyClientFilters(
+  results: RankedRepo[],
+  filters: {
+    hideArchived: boolean;
+    hideForks: boolean;
+    hideTutorials: boolean;
+    language?: string;
+    sort: SortMode;
+  },
+): RankedRepo[] {
+  const lang = filters.language?.toLowerCase();
+  const out = results.filter((r) => {
+    if (filters.hideArchived && r.archived) return false;
+    if (filters.hideForks && r.fork) return false;
+    if (
+      filters.hideTutorials &&
+      (r.badges.includes("Possible tutorial") || r.badges.includes("Awesome list"))
+    ) {
+      return false;
+    }
+    if (lang && (!r.language || r.language.toLowerCase() !== lang)) return false;
+    return true;
+  });
+  sortRanked(out, filters.sort);
+  return out;
 }
 
 // Post-pass: when README excerpts are available for some of the ranked
@@ -351,6 +472,7 @@ export function enrichWithReadmes(
     // Boost: 0.5 points per matched term, capped at 5.
     const boost = clamp(matched.length * 0.5, 0, 5);
     const newScore = Math.round(clamp(r.score + boost, 0, 100));
+    const newRawScore = round1(r.rawScore + boost);
 
     // Re-state explanation with a README citation when we found real matches.
     const factBits: string[] = [];
@@ -365,6 +487,7 @@ export function enrichWithReadmes(
     return {
       ...r,
       score: newScore,
+      rawScore: newRawScore,
       scoreBreakdown: { ...r.scoreBreakdown, readme: round1(boost) },
       readmeExcerpt: excerpt,
       readmeMatched: matched,

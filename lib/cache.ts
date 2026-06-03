@@ -22,6 +22,10 @@ const README_FILE = path.join(CACHE_DIR, "readme-cache.json");
 const SEARCH_TTL_MS = 60 * 60 * 1000; // 1 hour
 const README_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const FLUSH_DEBOUNCE_MS = 250;
+// Hard caps so a busy instance can't grow the JSON files unbounded within the
+// TTL window. Oldest entries are evicted first (FIFO via Map insertion order).
+const MAX_SEARCH_ENTRIES = 2000;
+const MAX_README_ENTRIES = 5000;
 
 interface SearchEntry {
   payload: SearchResponse;
@@ -67,24 +71,29 @@ function loadOnce(): void {
 function scheduleFlush(): void {
   if (!diskWritable) return;
   if (pendingFlush) clearTimeout(pendingFlush);
-  pendingFlush = setTimeout(flushNow, FLUSH_DEBOUNCE_MS);
+  pendingFlush = setTimeout(() => void flushNow(), FLUSH_DEBOUNCE_MS);
 }
 
-function flushNow(): void {
+async function flushNow(): Promise<void> {
   pendingFlush = null;
   if (!diskWritable) return;
+  // GC runs here (debounced) rather than on every write, so the O(n) scan is
+  // amortised instead of paid per set.
+  gc();
   try {
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.writeFileSync(SEARCH_FILE, JSON.stringify(Object.fromEntries(tables.search)), "utf8");
-    fs.writeFileSync(README_FILE, JSON.stringify(Object.fromEntries(tables.readme)), "utf8");
+    await fs.promises.mkdir(CACHE_DIR, { recursive: true });
+    // Async writes so a flush never blocks the event loop under load.
+    await Promise.all([
+      fs.promises.writeFile(SEARCH_FILE, JSON.stringify(Object.fromEntries(tables.search)), "utf8"),
+      fs.promises.writeFile(README_FILE, JSON.stringify(Object.fromEntries(tables.readme)), "utf8"),
+    ]);
   } catch (err) {
     diskWritable = false;
     console.warn("[cache] disk write failed; continuing in memory only:", err);
   }
 }
 
-// Garbage-collect expired entries opportunistically. Called from `set*` so we
-// don't grow unbounded between flushes.
+// Garbage-collect expired entries.
 function gc(): void {
   const now = Date.now();
   for (const [k, v] of tables.search) {
@@ -95,9 +104,20 @@ function gc(): void {
   }
 }
 
+// Evict oldest entries (insertion order) until the table is within its cap.
+function evict<T>(table: Map<string, T>, max: number): void {
+  while (table.size > max) {
+    const oldest = table.keys().next().value;
+    if (oldest === undefined) break;
+    table.delete(oldest);
+  }
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────
 
-export function searchCacheKey(query: string, filters: unknown): string {
+// `filters` is optional and accepted only for back-compat; the API now keys on
+// the query alone (results no longer vary by the client-side display filters).
+export function searchCacheKey(query: string, filters?: unknown): string {
   return crypto.createHash("sha1").update(JSON.stringify({ query, filters })).digest("hex");
 }
 
@@ -114,8 +134,10 @@ export function getCachedSearch(key: string): SearchResponse | null {
 
 export function setCachedSearch(key: string, payload: SearchResponse): void {
   loadOnce();
+  // Re-insert so a refreshed key moves to the newest position (FIFO eviction).
+  tables.search.delete(key);
   tables.search.set(key, { payload, createdAt: Date.now() });
-  gc();
+  evict(tables.search, MAX_SEARCH_ENTRIES);
   scheduleFlush();
 }
 
@@ -132,8 +154,9 @@ export function getCachedReadme(fullName: string): string | null {
 
 export function setCachedReadme(fullName: string, content: string): void {
   loadOnce();
+  tables.readme.delete(fullName);
   tables.readme.set(fullName, { content, fetchedAt: Date.now() });
-  gc();
+  evict(tables.readme, MAX_README_ENTRIES);
   scheduleFlush();
 }
 

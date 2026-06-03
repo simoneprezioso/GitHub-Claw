@@ -1,27 +1,37 @@
 # GitHub Claw 🐙
 
-> Find open-source projects from an idea, not keywords.
+> Real open-source projects for your idea — verified, scored, and triaged. Never invented.
 
-GitHub Claw is a small web app that turns a vague project description into a ranked list of real, relevant GitHub repositories. You type something fuzzy like *"self-hosted Typeform alternative built with React"* — it expands the idea into multiple targeted GitHub search queries, dedupes the candidates, scores them on relevance + popularity + freshness + health, and returns a clean ranked list with badges, warnings, and an explanation for each match.
+Ask an LLM "find me an open-source Typeform alternative in React" and it will happily invent a repo, link a dead URL, or quote a star count from two years ago. **GitHub Claw won't.** You describe a tool in plain English; it expands the idea into targeted GitHub searches, ranks the *real, currently-live* repositories it finds, and tells you straight up whether each one is safe to **Adopt**, **Risky**, or **Abandoned** — every signal pulled from the GitHub API at request time, nothing fabricated.
 
-It's a search engine, not a chatbot. No accounts, no billing, no LLM APIs.
+It's a search engine, not a chatbot. No accounts, no billing, no LLM API.
+
+---
+
+## Why it's different
+
+The thing a hallucination-prone assistant *structurally cannot promise* is the thing Claw is built around:
+
+- **Every result is real.** Repos come straight from the GitHub REST API. If it's in the list, it exists right now, with its true star count, license, and last-push date.
+- **Maintenance verdict, front and center.** Each result carries an **Adopt / Risky / Abandoned** badge derived only from fetched metadata (archive flag, push recency, license, fork status). No incumbent fuses *discovery* with a *health verdict* — this is the headline.
+- **Transparent scoring.** Click any score pill to see the exact breakdown (relevance, popularity, freshness, health, penalties, optional README + semantic contributions). Nothing is a black box.
+- **Grounded explanations.** The "why matched" line cites only terms that actually appear in the fetched name/description/topics/README — never invented features.
 
 ---
 
 ## Features
 
 - **Plain-English search** — describe a tool, app, library, or project in your own words.
-- **Deterministic query expansion** — ~55 hand-curated categories (forms, notion-likes, terminal recorders, kanban, mesh VPN, vector DBs, …), alt-name detection ("X alternative"), tech stack hints, and modifiers like *self-hosted* and *local-first* — all in pure TypeScript, no LLM.
-- **Hybrid ranking** — every repo gets a transparent 0–100 score with a clickable breakdown: text relevance, popularity (log-scaled), freshness, health, penalties, optional README boost, optional embedding contribution.
-- **README-grounded explanations** — for the top 5 hits, we fetch and parse the README, and if your query terms appear in it we cite that fact in the "why matched" line. No hallucinations — citations come from real fetched text.
-- **Optional semantic reranker** — set `ENABLE_EMBEDDING_RERANK=1` to layer cosine-similarity reranking on top of the heuristic, using a local 25MB sentence-transformer (`Xenova/all-MiniLM-L6-v2`). Off by default; deterministic path is always the floor.
-- **Shareable URLs** — `/?q=…&sort=stars` auto-runs the search. Filter state is reflected in the URL too. "Copy link" button next to results.
-- **Cache** — repeat searches within the hour and README fetches within the day are served from a local JSON file cache (in-memory mirror, debounced flush). Survives restarts; degrades to memory-only if the disk is read-only.
-- **Health badges & warnings** — *Active*, *Popular*, *Stale*, *Archived*, *Fork*, *Possible tutorial*, *Awesome list*, *No license*, *Has demo*.
-- **Filters & sort** — relevance / stars / recent, language picker, toggle for archived / forks / tutorials & lists.
-- **Graceful errors** — clear messaging on rate limits with a hint to add a `GITHUB_TOKEN`.
-- **Tested** — 83 unit tests against query expansion, ranking, cache, and embedding math (`npm test`).
-- **No database, no auth, no external SaaS.** Next.js + the GitHub REST API + an optional local model.
+- **Adopt / Risky / Abandoned verdict** — a live-metadata maintenance triage on every result, plus a summary tally above the list.
+- **Deterministic query expansion** — ~55 hand-curated categories (forms, notion-likes, terminal recorders, kanban, mesh VPN, vector DBs, …), `"X alternative"` / `"X clone"` detection, tech-stack hints, and modifiers (*self-hosted*, *local-first*) — pure TypeScript, no LLM.
+- **Hybrid ranking** — a transparent 0–100 score per repo. The **entire deduped candidate pool** is scored (we no longer pre-filter by stars, which used to delete niche exact matches before ranking).
+- **Semantic reranker, on by default** — the top heuristic candidates are re-ordered by cosine similarity from a local 25 MB sentence-transformer (`Xenova/all-MiniLM-L6-v2`). Runs locally, no API key; the deterministic path stays the floor and is used automatically if the model can't load. Opt out with `DISABLE_EMBEDDING_RERANK=1`.
+- **Instant filters & sort** — language picker, sort, and archived/fork/tutorial toggles are applied **client-side** over the fetched set, so they're instant and cost **zero** extra GitHub calls.
+- **Bring-your-own token** — paste your own GitHub token in the UI (stored only in your browser, sent per-request via header) to lift your rate limit without the operator sharing one PAT.
+- **Abuse-resistant API** — per-IP rate limiting, a global outbound-concurrency cap, and in-flight request coalescing protect the shared token from a thundering herd.
+- **README-grounded explanations** for the top hits, **shareable `/?q=…` URLs**, a JSON-file **cache** (1 h searches, 24 h READMEs, with size caps and async flush), and **health badges & warnings**.
+- **Multiple surfaces** — the web app, a **CLI**, and an **MCP server** all share one search pipeline (`lib/searchPipeline.ts`), so coding agents get the same grounded, verified results.
+- **Tested** — unit + integration tests across query expansion, ranking, the maintenance verdict, the GitHub client, README handling, and the API route (`npm test`).
 
 ---
 
@@ -30,221 +40,133 @@ It's a search engine, not a chatbot. No accounts, no billing, no LLM APIs.
 ### Prerequisites
 
 - **Node.js 18.17+** (Node 20+ recommended).
-- A GitHub personal access token is **optional but strongly recommended**. Without one, you'll be rate-limited to 60 requests/hour per IP — fine to try out, but you'll hit limits within a few searches.
-
-### Create a GitHub token
-
-1. Go to <https://github.com/settings/tokens> → **Generate new token (classic)**.
-2. **No scopes are required** — public repository search works with an empty-scope token.
-3. Give it a name like `github-claw`, set an expiration, generate it, and copy the value.
-4. Fine-grained tokens also work: scope it to public repos / read-only.
-
-This raises your rate limit from **60 → 5,000 requests/hour**.
+- A GitHub personal access token is **optional but strongly recommended** (raises the limit from 60 → 5,000 req/hour). No scopes needed for public search.
 
 ### Install and run
 
 ```bash
-# 1. Install deps  (--legacy-peer-deps because eslint-config-next@16 + eslint@9 peer ranges are strict)
-npm install --legacy-peer-deps
-
-# 2. Configure env
-cp .env.example .env.local
-# then edit .env.local and paste your token after GITHUB_TOKEN=
-
-# 3. Dev server
-npm run dev
-# → http://localhost:3000
+npm install --legacy-peer-deps    # eslint-config-next@16 + eslint@9 peer ranges are strict
+cp .env.example .env.local         # then paste your token after GITHUB_TOKEN=
+npm run dev                        # → http://localhost:3000
 ```
 
 ### Other scripts
 
 ```bash
-npm test            # vitest run — 83 unit tests
+npm test            # vitest run
 npm run test:watch  # watch mode
-npm run test:cov    # coverage report (HTML + text)
+npm run test:cov    # coverage report
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint .
-npm run build       # production build (Next 16 + Turbopack)
+npm run build       # production build
 npm run start       # serve the production build
+npm run cli -- "self-hosted Typeform alternative in React"   # terminal search
+npm run mcp          # start the MCP server (stdio) for coding agents
 ```
 
 ### Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `GITHUB_TOKEN` | No | GitHub PAT. Without it, the app uses unauthenticated GitHub API requests (60 req/hr) and surfaces a warning in the UI. |
-| `ENABLE_EMBEDDING_RERANK` | No | Set to `"1"` to enable the semantic reranker. Off by default. First call downloads ~25MB of model weights (cached after that). |
+| `GITHUB_TOKEN` | No | Server-side GitHub PAT. Without it, unauthenticated requests are limited to 60/hour per IP. Users can also supply their own token in the UI. |
+| `DISABLE_EMBEDDING_RERANK` | No | Set to `"1"` to turn the semantic reranker **off** (it's on by default). `ENABLE_EMBEDDING_RERANK=0` also works. |
+| `TRANSFORMERS_MODEL_PATH` | No | Directory containing a bundled copy of the embedding model. Set it to skip the ~25 MB download on cold start (recommended for serverless/Docker). |
+
+---
+
+## Surfaces
+
+### CLI
+
+```bash
+npm run cli -- "tool that converts PDFs into structured JSON"
+npm run cli -- --json "kanban board self-hosted"     # machine-readable
+npm run cli -- --no-rerank "rust game engine"        # skip the semantic step
+GITHUB_TOKEN=ghp_… npm run cli -- "mesh vpn"          # authenticated
+```
+
+### MCP server
+
+`npm run mcp` starts a stdio [Model Context Protocol](https://modelcontextprotocol.io) server exposing a single `search_repositories` tool. Point a coding agent / IDE at it to get **grounded, hallucination-free** repo discovery — the agent receives real repos with scores and maintenance verdicts instead of guessing. Example client config:
+
+```jsonc
+{
+  "mcpServers": {
+    "github-claw": {
+      "command": "npm",
+      "args": ["run", "--silent", "mcp"],
+      "cwd": "/path/to/GitClaw",
+      "env": { "GITHUB_TOKEN": "ghp_…" }
+    }
+  }
+}
+```
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────┐
-│  app/page.tsx (server)          │  ← Suspense boundary
-│  app/HomeClient.tsx (client)    │  ← state, URL ↔ params, fetch
-│   ├─ components/SearchBox       │
-│   ├─ components/FiltersBar      │
-│   └─ components/ResultsList     │
-│       └─ components/RepoCard    │  ← score breakdown, README excerpt
-└──────────────┬──────────────────┘
-               │ POST /api/search { query, filters }
-               ▼
-┌────────────────────────────────────────────────┐
-│  app/api/search/route.ts                       │
-│   1. validate request                          │
-│   2. ▸ cache check (1h TTL) — return early on hit
-│   3. expand query                              │
-│   4. fan-out GitHub search → dedupe candidates │
-│   5. rank + filter                             │
-│   6. ▸ fetch READMEs for top 5 + re-score      │
-│   7. ▸ optional embedding rerank (env-gated)   │
-│   8. cache write + respond                     │
-└──┬───────────┬──────────┬─────────┬────────┬───┘
-   │           │          │         │        │
-   ▼           ▼          ▼         ▼        ▼
-queryExpansion github   ranking  readme   embeddings    cache
-   .ts          .ts       .ts      .ts        .ts         .ts
-                                                          │
-                                                          ▼
-                                                   var/*.json
+app/page.tsx ─ Suspense ─ app/HomeClient.tsx ─ SearchBox / FiltersBar / ResultsList → RepoCard
+                                   │ POST /api/search { query }   (x-github-token header)
+                                   ▼
+app/api/search/route.ts ── rate-limit → cache → coalesce ──▶ lib/searchPipeline.ts
+                                                                  │
+        ┌──────────────┬──────────────┬──────────┬───────────────┤
+        ▼              ▼              ▼          ▼               ▼
+   queryExpansion   github        ranking    readme         embeddings
+        (.ts)        (.ts)         (.ts)       (.ts)            (.ts)
+                       │ withOutboundSlot (lib/limits.ts)        │
+                       ▼                                          ▼
+                  GitHub REST API                          local MiniLM model
+
+CLI (scripts/claw-cli.mts) ─┐
+MCP (scripts/claw-mcp.mts) ─┴─▶ lib/searchPipeline.ts   (same logic as the route)
 ```
 
-### File map
-
-| File | Role |
-|---|---|
-| `app/page.tsx` | Server component — Suspense boundary around the client. |
-| `app/HomeClient.tsx` | Client component: state, URL ↔ filter sync, search fetch, Copy-link button. |
-| `app/api/search/route.ts` | Server route: validates, orchestrates, returns the response. |
-| `lib/queryExpansion.ts` | Turns a plain-English idea into expansion terms, topics, and GitHub search query strings. |
-| `lib/github.ts` | Wrapper around `/search/repositories` with auth, dedupe, and rate-limit handling. |
-| `lib/ranking.ts` | Hybrid score + breakdown + badges + explanations. Includes `enrichWithReadmes` post-pass. |
-| `lib/readme.ts` | Bounded-concurrency README fetcher with markdown sanitization. |
-| `lib/cache.ts` | JSON-file-backed cache with in-memory mirror, debounced flush, and graceful disk fallback. |
-| `lib/embeddings.ts` | Optional semantic reranker using transformers.js + MiniLM. Env-gated. |
-| `lib/types.ts` | Shared TypeScript types (request, response, repo, ranking). |
-| `lib/utils.ts` | Tokenization, stopwords, formatting helpers. |
-| `components/*` | UI: `SearchBox`, `RepoCard`, `ResultsList`, `FiltersBar`. |
-| `tests/*` | 83 unit tests (Vitest). |
-
-### API contract
-
-`POST /api/search`
-
-```jsonc
-// Request
-{
-  "query": "self-hosted Typeform alternative built with React",
-  "filters": {
-    "hideArchived": true,
-    "hideForks": true,
-    "hideTutorials": false,
-    "language": "TypeScript",
-    "sort": "relevance"   // or "stars" | "recent"
-  }
-}
-```
-
-```jsonc
-// Response (200)
-{
-  "query": "…",
-  "expandedQueries": ["…", "…"],
-  "results": [
-    {
-      "fullName": "owner/repo",
-      "name": "repo",
-      "owner": "owner",
-      "url": "https://github.com/owner/repo",
-      "description": "…",
-      "stars": 12345,
-      "forks": 678,
-      "language": "TypeScript",
-      "license": "AGPL-3.0",
-      "topics": ["form-builder", "self-hosted"],
-      "homepage": "https://…",
-      "pushedAt": "2025-…",
-      "updatedAt": "2025-…",
-      "archived": false,
-      "fork": false,
-      "score": 87,
-      "scoreBreakdown": {
-        "textRelevance": 42,
-        "popularity": 18.5,
-        "freshness": 15,
-        "health": 11,
-        "penalty": 0
-      },
-      "badges": ["Active", "Popular", "Has demo"],
-      "warnings": [],
-      "whyMatched": "Matched because the repo mentions \"form\", \"typeform\" … It's a TypeScript project, tagged form-builder, self-hosted, actively maintained."
-    }
-  ],
-  "meta": {
-    "candidateCount": 75,
-    "dedupedCount": 73,
-    "rateLimitRemaining": 4938,
-    "warnings": []
-  }
-}
-```
-
-Errors return `{ error, hint?, rateLimitRemaining? }` with appropriate HTTP status codes (400 for bad input, 429 for rate limit, 502 for upstream).
+`POST /api/search` accepts `{ query }`. Filters/sort are applied **client-side**, so the response is filter-independent and cached by query alone. Errors return `{ error, hint?, rateLimitRemaining? }` with the right status (400 bad input, 429 rate-limited, 502/504 upstream).
 
 ---
 
 ## How ranking works
 
-Each repo's score is the sum of four positive components minus a penalty, clamped to 0–100. The breakdown is returned to the UI so you can click the score pill on any card to see exactly where its number came from.
+Each repo's score is four positive components minus a penalty, clamped to 0–100. The breakdown is returned to the UI.
 
-| Component | Range | What it rewards |
+| Component | Range | Rewards |
 |---|---|---|
-| **Text relevance** | 0–50 | Weighted token overlap with **name** (×6), **topics** (×4), **description** (×2), **language** (×1.5). Multi-word phrases like "form builder" get a small extra bonus on exact-substring match. Original query tokens count 1.5× as much as expansion synonyms. |
-| **Popularity** | 0–25 | `log10(stars + 1) × 5`, capped. A 100k-star repo scores ~25; a 10-star repo ~5. Log scale on purpose — we don't want huge meta-projects crowding out niche but well-fitting tools. |
-| **Freshness** | 0–15 | Push date: ≤3 mo = 15, ≤6 mo = 12, ≤12 mo = 8, ≤18 mo = 4, else 0. |
-| **Health** | 0–12 | +3 license, +2 topics≥2, +2 homepage URL, +2 description >20 chars, +2 stars ≥100, +1 not archived. |
-| **Penalty** | subtractive | Archived −15, fork −10, awesome-list −20, tutorial/demo/boilerplate −8, no description −5, no license −2, no pushes in 2y+ −8. |
+| **Text relevance** | 0–50 | Weighted token overlap with name (×6), topics (×4), description (×2), language (×1.5), plus a small multi-word-phrase bonus. Original query tokens count 1.5× synonyms. |
+| **Popularity** | 0–25 | `log10(stars + 1) × 5`, capped — log scale so megaprojects don't crowd out niche-but-fitting tools. |
+| **Freshness** | 0–15 | ≤3 mo = 15, ≤6 mo = 12, ≤12 mo = 8, ≤18 mo = 4, else 0. |
+| **Health** | 0–12 | license, ≥2 topics, homepage, real description, ≥100 stars, not archived. |
+| **Penalty** | subtractive | archived −15, fork −10, awesome-list −20, tutorial/demo −8, no description −5, no license −2, no pushes in 2y+ −8. |
 
-### Query expansion in one paragraph
+Two correctness notes from the latest revision:
 
-`lib/queryExpansion.ts` has a curated map of ~25 software categories (forms, notion-likes, browser agents, terminal recorders, PDF parsers, etc.). Each category has trigger phrases, synonym terms, and GitHub topic slugs. The expander also detects "X alternative", "X clone", common tech stacks (React, Next.js, Rust, Go, …), and modifiers (self-hosted, local-first, offline). It then emits 1–3 orthogonal GitHub search queries: a broad text query, a topic-restricted query, and an alternative/clone variant. Candidates are deduped by `full_name` and capped at 75 before ranking.
+- **The full deduped pool is ranked** — candidate selection no longer pre-sorts by stars and truncates, which previously evicted low-star exact matches before scoring.
+- **Ties break on real quality, not stars** — sorting uses the fractional, unclamped `rawScore` (then text relevance, then stars), so a tangential megaproject can't win a tie over an exact match, and two penalty-floored repos still order by their true relative quality.
 
-### "Why matched" explanations
+### Maintenance verdict
 
-Deterministic. The explanation cites only the metadata we actually fetched: which user tokens appeared in name/description/topics, the primary language, up to 3 topics, recency, and whether the repo is widely used. We **never** hallucinate README content, contributor lists, or features the API didn't return.
+Derived purely from fetched metadata:
+
+- **Abandoned** — archived, or no commits in 2+ years.
+- **Risky** — no commits in 1+ year, a fork, no license, or it looks like a curated list / tutorial.
+- **Adopt** — recent activity, licensed, no red flags.
+
+### Tutorial / awesome detection
+
+Re-scoped to avoid false positives: we no longer match a bare `awesome` (it nuked real libraries) or a bare `learning` (it flagged every ML repo). "Awesome list" now requires an actual list signal or the `awesome-` name prefix; weak signals (demo/example/starter/boilerplate) are matched in the **name/topics only**, never the description.
 
 ---
 
 ## Known limitations
 
-- **GitHub API rate limits.** Without a token, you have 60 requests/hour per IP — that's ~20 searches (each search fires 1–4 sub-queries plus up to 5 README fetches; the cache softens this for repeats). With a token, 5,000/hr. The UI surfaces remaining quota.
-- **Semantic reranking is opt-in.** The default path is purely deterministic. Set `ENABLE_EMBEDDING_RERANK=1` to layer cosine similarity on top — first request after server start downloads ~25MB of model weights.
-- **No full-code indexing.** README excerpts are now fetched for the top 5, but we still don't read source code. Repos with great code but terrible descriptions *and* terrible READMEs will rank lower than they should.
-- **Tutorial / awesome-list detection is regex-only.** A repo named `awesome-design-patterns` will be flagged correctly; a poorly-named tutorial may not be. Use the *Hide tutorials & lists* toggle to filter aggressively.
-- **GitHub search itself is fuzzy.** Two identical queries minutes apart can return slightly different result sets. The cache largely hides this for repeats; ranking absorbs the rest.
-- **English-only synonym map.** Non-English queries fall through to plain GitHub search with no expansion.
-- **SQLite was planned, JSON file used instead.** `better-sqlite3` requires Visual Studio C++ build tools on Windows; we pivoted to a JSON file cache that needs no native deps. Same TTL semantics, slightly less efficient at scale — fine for a single-instance dev/demo.
-- **Embedding reranker is server-only and stateful.** The pipeline is loaded once per server instance and held in module scope. On serverless deployments (Vercel functions), each cold start re-downloads/loads the model.
-
----
-
-## Roadmap / future improvements
-
-Already shipped in this revision (v1.5):
-- ✅ Embedding-based reranker (`Xenova/all-MiniLM-L6-v2`, env-gated).
-- ✅ README excerpt fetch for the top 5 + grounded "why matched" explanations.
-- ✅ JSON-file cache for both searches (1h TTL) and READMEs (24h TTL).
-- ✅ Shareable `/?q=…` URLs + "Copy link" button.
-- ✅ Vitest unit-test suite (83 tests covering query expansion, ranking, cache, embedding math).
-- ✅ Synonym map expanded to ~55 categories.
-
-Still ahead:
-- 🏷️ Auto-populate the synonym map from GitHub's `/topics` data on first run.
-- 🌐 Multi-source search: include npm / PyPI / crates.io alongside GitHub.
-- 🪄 Optional LLM-assisted query expansion (off by default, requires a key, falls back to deterministic).
-- 📊 Per-query analytics in dev mode — which sub-queries contributed which candidates.
-- 🐳 Dockerfile so the embedding model lives in the image instead of being re-downloaded.
+- **GitHub API rate limits.** ~9 calls per uncached search. Without a token: 60/hr per IP. The in-process rate limiter, outbound semaphore, and request coalescing protect the shared token, but a hosted multi-user deployment should move to **per-user OAuth / a GitHub App** (5,000/hr per installation) — the per-user token field in the UI is the first step toward that.
+- **In-memory limits/cache are single-instance.** The token bucket, coalescing map, embedding-vector cache, and JSON file cache live in process memory; on multi-instance or serverless deployments, back the limiter with Redis/Upstash and expect the file cache to be per-instance (and read-only on some platforms).
+- **Embedding model cold start.** First search after boot loads the 25 MB model. Bundle it and set `TRANSFORMERS_MODEL_PATH` to avoid re-downloading on every cold start.
+- **No full-code indexing.** We read metadata + README excerpts, not source code.
+- **English-only synonym map.** Non-English queries fall through to plain GitHub search.
+- **Single-token product, not yet multi-tenant.** See the OAuth note above before any public launch.
 
 ---
 

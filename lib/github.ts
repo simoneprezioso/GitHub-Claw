@@ -4,10 +4,16 @@
 import type { GitHubRepo } from "./types";
 
 const SEARCH_URL = "https://api.github.com/search/repositories";
-const PER_PAGE = 30; // GitHub max is 100, but 30 keeps each call cheap.
+// GitHub's Search API costs exactly ONE rate-limit unit per request regardless
+// of per_page (1–100), so a smaller page is NOT cheaper — it only lowers recall.
+// We fetch the max so the candidate pool actually fills before dedupe.
+const PER_PAGE = 100;
+const SEARCH_TIMEOUT_MS = 8000; // mirror readme.ts so a hung connection can't hang the request
 
 export interface GitHubSearchResult {
   candidates: GitHubRepo[];
+  // Total items returned across all sub-queries before dedupe (recall signal).
+  rawCount: number;
   rateLimitRemaining: number | null;
   // Queries that errored out — surfaced to the UI so we can show a soft warning.
   failedQueries: { query: string; status: number; message: string }[];
@@ -50,18 +56,39 @@ async function searchOnce(
   const url = `${SEARCH_URL}?q=${encodeURIComponent(query)}&per_page=${PER_PAGE}&sort=best-match`;
   const fetchImpl = env.fetchImpl ?? fetch;
 
-  const res = await fetchImpl(url, { headers, cache: "no-store" });
+  // Guard every call with a timeout — without this a single hung connection
+  // hangs the whole /api/search request up to the platform function timeout.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SEARCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetchImpl(url, { headers, cache: "no-store", signal: ctrl.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new GitHubError("GitHub search timed out.", 504);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
   const rateLimitRemainingHeader = res.headers.get("x-ratelimit-remaining");
   const rateLimitRemaining = rateLimitRemainingHeader ? Number(rateLimitRemainingHeader) : null;
 
   if (!res.ok) {
-    // Distinguish rate-limit from other errors. GitHub returns 403 with
-    // x-ratelimit-remaining: 0 when you're throttled.
-    const rateLimited = res.status === 403 && rateLimitRemaining === 0;
     const body = await safeJson(res);
     const message = (body && typeof body === "object" && "message" in body && typeof body.message === "string")
       ? body.message
       : `GitHub request failed (${res.status})`;
+    // Distinguish throttling from other errors. GitHub returns 403/429 with
+    // x-ratelimit-remaining: 0 for the primary limit, and a 403 whose body
+    // mentions a "secondary rate limit"/"abuse" (often with Retry-After) for
+    // the secondary limit. Treat both as rate-limited.
+    const rateLimited =
+      (res.status === 403 || res.status === 429) &&
+      (rateLimitRemaining === 0 ||
+        res.headers.has("retry-after") ||
+        /secondary rate limit|abuse/i.test(message));
     throw new GitHubError(message, res.status, { rateLimitRemaining, rateLimited });
   }
 
@@ -89,9 +116,11 @@ export async function searchRepositories(
   const failed: GitHubSearchResult["failedQueries"] = [];
   let minRemaining: number | null = null;
   let rateLimited = false;
+  let rawCount = 0;
 
   results.forEach((r, idx) => {
     if (r.status === "fulfilled") {
+      rawCount += r.value.items.length;
       for (const repo of r.value.items) {
         if (!repo.full_name) continue;
         if (!byFullName.has(repo.full_name)) {
@@ -132,6 +161,7 @@ export async function searchRepositories(
 
   return {
     candidates: Array.from(byFullName.values()),
+    rawCount,
     rateLimitRemaining: minRemaining,
     failedQueries: failed,
     rateLimited,

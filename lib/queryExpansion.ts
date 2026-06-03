@@ -429,8 +429,11 @@ export function expandQuery(rawInput: string): ExpandedQuery {
   expansionTerms.push(...modifierTerms);
 
   // "alternative to X" / "X alternative" pattern — capture X as a strong signal.
+  // The capture is a SINGLE token (no space in the class): "alternative to Notion
+  // for my team" must capture "notion", not "notion for my team" (which built a
+  // query matching nothing). This matches the second branch's behaviour.
   const altMatch =
-    input.match(/\balternative(?:s)? to ([a-z0-9.\- ]+)/i) ||
+    input.match(/\balternative(?:s)? to ([a-z0-9.\-]+)/i) ||
     input.match(/\b([a-z0-9.\-]+) alternative\b/i);
   if (altMatch) {
     const target = altMatch[1].trim().toLowerCase();

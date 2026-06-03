@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GitHub Claw — find open-source projects from an idea",
+  title: "GitHub Claw — verified open-source discovery, no hallucinations",
   description:
-    "Describe a tool, app, or library in plain English. GitHub Claw expands your idea into search queries and ranks real GitHub repositories by relevance, popularity, freshness, and health.",
+    "Describe a tool in plain English and get real, currently-live GitHub repositories — pulled from the API, never invented — with a transparent match score and an honest Adopt / Risky / Abandoned maintenance verdict.",
   openGraph: {
     title: "GitHub Claw",
-    description: "Find open-source projects from an idea, not keywords.",
+    description:
+      "Real repos for your idea — verified, scored, and triaged (Adopt / Risky / Abandoned). No hallucinated repos, no dead links.",
     type: "website",
   },
 };

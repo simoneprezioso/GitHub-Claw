@@ -61,6 +61,17 @@ export type HealthBadge =
   | "No license"
   | "Has demo";
 
+// Headline maintenance triage — the "can I rely on this?" verdict. This is the
+// product's core differentiator vs. hallucination-prone LLM recommendations:
+// every verdict is derived from live, fetched GitHub metadata, never invented.
+export type MaintenanceVerdict = "Adopt" | "Risky" | "Abandoned";
+
+export interface Maintenance {
+  verdict: MaintenanceVerdict;
+  // Short, human-readable, evidence-grounded reasons for the verdict.
+  reasons: string[];
+}
+
 export interface RankedRepo {
   fullName: string;
   name: string;
@@ -80,7 +91,13 @@ export interface RankedRepo {
   fork: boolean;
   openIssues: number;
   score: number;
+  // Fractional, unclamped score used only for sort tie-breaking so that two
+  // repos that round to the same integer `score` (or both clamp to 0) still
+  // order by their true relative quality instead of falling through to stars.
+  rawScore: number;
   scoreBreakdown: ScoreBreakdown;
+  // Live-metadata maintenance verdict (Adopt / Risky / Abandoned).
+  maintenance: Maintenance;
   badges: HealthBadge[];
   warnings: string[];
   whyMatched: string;
@@ -93,12 +110,16 @@ export interface RankedRepo {
 }
 
 export interface SearchMeta {
+  // Total raw results across all sub-queries, before dedupe.
   candidateCount: number;
+  // Unique repositories after dedupe — the full pool the ranker scored.
   dedupedCount: number;
   rateLimitRemaining: number | null;
   warnings: string[];
   // True when the response was served entirely from the cache (no GitHub calls).
   cached?: boolean;
+  // True when the optional embedding reranker contributed to this response.
+  reranked?: boolean;
 }
 
 export interface SearchResponse {

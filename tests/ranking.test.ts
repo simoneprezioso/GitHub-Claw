@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { rankRepos, uniqueLanguages } from "@/lib/ranking";
+import { rankRepos, uniqueLanguages, compareRanked, applyClientFilters } from "@/lib/ranking";
 import { expandQuery } from "@/lib/queryExpansion";
-import type { GitHubRepo, SortMode } from "@/lib/types";
+import type { GitHubRepo, RankedRepo, SortMode } from "@/lib/types";
 
 // Build a GitHubRepo with sensible defaults so each test only needs to set
 // the fields it cares about.
@@ -321,5 +321,151 @@ describe("uniqueLanguages", () => {
       filters: defaultFilters(),
     });
     expect(uniqueLanguages(ranked)).toEqual(["Python", "TypeScript"]);
+  });
+});
+
+const months = (n: number) => new Date(Date.now() - 1000 * 60 * 60 * 24 * 30 * n).toISOString();
+
+describe("rankRepos — maintenance verdict", () => {
+  const e = expandQuery("anything");
+  const verdict = (o: Partial<GitHubRepo> & { full_name: string }) =>
+    rankRepos({
+      repos: [makeRepo(o)],
+      expanded: e,
+      filters: { ...defaultFilters(), hideArchived: false, hideForks: false },
+    })[0].maintenance.verdict;
+
+  it("recent + licensed + stars → Adopt", () => {
+    expect(verdict({ full_name: "a/a", pushed_at: months(1) })).toBe("Adopt");
+  });
+
+  it("archived → Abandoned", () => {
+    expect(verdict({ full_name: "a/a", archived: true })).toBe("Abandoned");
+  });
+
+  it("no commits in 3 years → Abandoned", () => {
+    expect(verdict({ full_name: "a/a", pushed_at: months(36) })).toBe("Abandoned");
+  });
+
+  it("fork → Risky", () => {
+    expect(verdict({ full_name: "a/a", fork: true, pushed_at: months(1) })).toBe("Risky");
+  });
+
+  it("no usable license → Risky", () => {
+    expect(
+      verdict({ full_name: "a/a", pushed_at: months(1), license: { spdx_id: "NOASSERTION", name: "" } }),
+    ).toBe("Risky");
+  });
+
+  it("stale (>1yr, <2yr) but licensed → Risky", () => {
+    expect(verdict({ full_name: "a/a", pushed_at: months(18) })).toBe("Risky");
+  });
+});
+
+describe("rankRepos — tutorial/awesome false-positive fixes", () => {
+  const e = expandQuery("widget");
+  const badges = (o: Partial<GitHubRepo> & { full_name: string }) =>
+    rankRepos({
+      repos: [makeRepo(o)],
+      expanded: e,
+      filters: { ...defaultFilters(), hideTutorials: false, hideForks: false, hideArchived: false },
+    })[0].badges;
+
+  it("'awesome' as a plain adjective in the description is NOT flagged as a list", () => {
+    const b = badges({ full_name: "acme/widget", description: "An awesome widget with a live demo." });
+    expect(b).not.toContain("Awesome list");
+    expect(b).not.toContain("Possible tutorial"); // 'demo' only in description
+  });
+
+  it("'awesome-' name prefix IS flagged", () => {
+    expect(badges({ full_name: "sindre/awesome-go", description: "Stuff." })).toContain("Awesome list");
+  });
+
+  it("bare 'machine learning' is NOT flagged as a tutorial", () => {
+    expect(
+      badges({ full_name: "org/ml-lib", description: "A machine learning framework." }),
+    ).not.toContain("Possible tutorial");
+  });
+
+  it("'boilerplate' in the repo NAME is flagged", () => {
+    expect(badges({ full_name: "org/react-boilerplate", description: "Production app." })).toContain(
+      "Possible tutorial",
+    );
+  });
+});
+
+describe("rankRepos — golden score components (regression lock)", () => {
+  it("pins popularity / freshness / health / penalty for a known repo", () => {
+    const e = expandQuery("kanban");
+    const r = rankRepos({
+      repos: [
+        makeRepo({
+          full_name: "team/kanban",
+          name: "kanban",
+          description: "A self-hosted kanban board for teams with plenty of detail.",
+          topics: ["kanban", "board"],
+          stargazers_count: 1000,
+          homepage: "https://example.com",
+          license: { spdx_id: "MIT", name: "MIT License" },
+          pushed_at: months(1),
+        }),
+      ],
+      expanded: e,
+      filters: defaultFilters(),
+    })[0];
+    expect(r.scoreBreakdown.popularity).toBe(15); // log10(1001) * 5
+    expect(r.scoreBreakdown.freshness).toBe(15); // pushed ~1 month ago
+    expect(r.scoreBreakdown.health).toBe(12); // license+topics+homepage+desc+stars+notArchived
+    expect(r.scoreBreakdown.penalty).toBe(0);
+    expect(r.scoreBreakdown.textRelevance).toBeGreaterThan(0);
+    expect(r.rawScore).toBeGreaterThan(r.score - 1); // rawScore tracks the (rounded) score
+  });
+});
+
+describe("compareRanked — tie-breaking", () => {
+  const base = (over: Partial<RankedRepo>): RankedRepo =>
+    ({
+      score: 42,
+      rawScore: 42,
+      stars: 100,
+      scoreBreakdown: { textRelevance: 10, popularity: 0, freshness: 0, health: 0, penalty: 0 },
+      ...over,
+    } as unknown as RankedRepo);
+
+  it("breaks an integer-score tie by fractional rawScore", () => {
+    const hi = base({ rawScore: 42.8 });
+    const lo = base({ rawScore: 42.1 });
+    expect([lo, hi].sort(compareRanked)[0]).toBe(hi);
+  });
+
+  it("when rawScore ties, higher text relevance beats higher stars", () => {
+    const text = base({ rawScore: 42, stars: 1, scoreBreakdown: { textRelevance: 30, popularity: 0, freshness: 0, health: 0, penalty: 0 } });
+    const stars = base({ rawScore: 42, stars: 99999, scoreBreakdown: { textRelevance: 5, popularity: 0, freshness: 0, health: 0, penalty: 0 } });
+    expect([stars, text].sort(compareRanked)[0]).toBe(text);
+  });
+});
+
+describe("applyClientFilters", () => {
+  const e = expandQuery("anything");
+  const full = rankRepos({
+    repos: [
+      makeRepo({ full_name: "a/keep", language: "TypeScript" }),
+      makeRepo({ full_name: "b/archived", archived: true }),
+      makeRepo({ full_name: "c/forked", fork: true }),
+      makeRepo({ full_name: "d/python", language: "Python" }),
+    ],
+    expanded: e,
+    filters: { ...defaultFilters(), hideArchived: false, hideForks: false },
+  });
+
+  it("hides archived, forks, and filters by language client-side", () => {
+    const out = applyClientFilters(full, {
+      hideArchived: true,
+      hideForks: true,
+      hideTutorials: false,
+      language: "TypeScript",
+      sort: "relevance",
+    });
+    expect(out.map((r) => r.fullName)).toEqual(["a/keep"]);
   });
 });
