@@ -16,6 +16,7 @@ import {
   meaningfulTokens,
   monthsSince,
   round1,
+  safeHttpUrl,
   uniq,
 } from "./utils";
 
@@ -165,7 +166,7 @@ function scoreHealth(repo: GitHubRepo): number {
   let s = 0;
   if (repo.license?.spdx_id && repo.license.spdx_id !== "NOASSERTION") s += 3;
   if ((repo.topics ?? []).length >= 2) s += 2;
-  if (repo.homepage && /^https?:\/\//i.test(repo.homepage)) s += 2;
+  if (safeHttpUrl(repo.homepage)) s += 2;
   if (repo.description && repo.description.length > 20) s += 2;
   if (repo.stargazers_count >= 100) s += 2;
   if (!repo.archived) s += 1;
@@ -200,7 +201,7 @@ function buildBadges(repo: GitHubRepo, flags: { tutorial: boolean; awesome: bool
   if (repo.stargazers_count >= 5000) badges.push("Popular");
 
   if (!repo.license?.spdx_id || repo.license.spdx_id === "NOASSERTION") badges.push("No license");
-  if (repo.homepage && /^https?:\/\//i.test(repo.homepage)) badges.push("Has demo");
+  if (safeHttpUrl(repo.homepage)) badges.push("Has demo");
 
   return uniq(badges);
 }
@@ -324,7 +325,11 @@ export function rankRepos(input: RankInputs): RankedRepo[] {
         name: repo.name,
         owner: repo.owner?.login ?? repo.full_name.split("/")[0] ?? "",
         ownerAvatar: repo.owner?.avatar_url ?? "",
-        url: repo.html_url,
+        // Validate the href even though html_url is GitHub-issued (defense in
+        // depth); fall back to a canonical, segment-encoded github.com URL.
+        url:
+          safeHttpUrl(repo.html_url) ??
+          `https://github.com/${repo.full_name.split("/").map(encodeURIComponent).join("/")}`,
         description: repo.description,
         stars: repo.stargazers_count,
         forks: repo.forks_count,
@@ -333,7 +338,7 @@ export function rankRepos(input: RankInputs): RankedRepo[] {
           ? repo.license.spdx_id
           : null,
         topics: repo.topics ?? [],
-        homepage: repo.homepage && /^https?:\/\//i.test(repo.homepage) ? repo.homepage : null,
+        homepage: safeHttpUrl(repo.homepage),
         pushedAt: repo.pushed_at,
         updatedAt: repo.updated_at,
         archived: repo.archived,

@@ -51,7 +51,11 @@ async function fetchOne(fullName: string, env: FetchEnv): Promise<string | null>
   };
   if (env.token) headers.Authorization = `Bearer ${env.token}`;
 
-  const url = `https://api.github.com/repos/${fullName}/readme`;
+  // Encode each path segment. `fullName` is "owner/repo" from the GitHub API
+  // today (safe charset), but encoding keeps a future untrusted caller from
+  // injecting path traversal or query params into the request URL.
+  const safePath = fullName.split("/").map(encodeURIComponent).join("/");
+  const url = `https://api.github.com/repos/${safePath}/readme`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PER_FETCH_TIMEOUT_MS);
   try {

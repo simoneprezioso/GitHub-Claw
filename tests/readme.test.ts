@@ -61,4 +61,16 @@ describe("fetchReadmes", () => {
     const map = await fetchReadmes([], { fetchImpl: vi.fn() as unknown as typeof fetch });
     expect(map.size).toBe(0);
   });
+
+  it("url-encodes each path segment of the repo full name", async () => {
+    let seenUrl = "";
+    const fetchImpl = vi.fn(async (url: string) => {
+      seenUrl = url;
+      return textRes("content");
+    }) as unknown as typeof fetch;
+    // A crafted name with traversal/query chars must not break out of the path.
+    await fetchReadmes(["ow ner/re..po?x=1"], { fetchImpl });
+    expect(seenUrl).toBe("https://api.github.com/repos/ow%20ner/re..po%3Fx%3D1/readme");
+    expect(seenUrl).not.toContain("?x=1");
+  });
 });

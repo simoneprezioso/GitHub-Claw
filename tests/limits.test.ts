@@ -64,12 +64,47 @@ describe("withOutboundSlot", () => {
 });
 
 describe("clientIp", () => {
-  it("reads the first x-forwarded-for entry", () => {
-    const req = new Request("http://x/", { headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8" } });
-    expect(clientIp(req)).toBe("1.2.3.4");
+  const reqWith = (headers: Record<string, string>) =>
+    new Request("http://x/", { headers });
+
+  it("with one trusted proxy, takes the entry the proxy appended (not the client-supplied left)", () => {
+    // XFF = "<client-spoofed>, <real client the proxy saw>".
+    const req = reqWith({ "x-forwarded-for": "1.2.3.4, 5.6.7.8" });
+    expect(clientIp(req, 1)).toBe("5.6.7.8");
+  });
+
+  it("ignores a forged leading XFF chain — the spoof never reaches the trusted slot", () => {
+    const req = reqWith({ "x-forwarded-for": "evil1, evil2, evil3, 9.9.9.9" });
+    expect(clientIp(req, 1)).toBe("9.9.9.9");
+  });
+
+  it("a short/empty header cannot slide a spoof into the trusted slot (index clamps)", () => {
+    // Attacker sends a single value hoping len-hops underflows; we clamp to 0.
+    expect(clientIp(reqWith({ "x-forwarded-for": "1.1.1.1" }), 2)).toBe("1.1.1.1");
+  });
+
+  it("honors multiple trusted hops", () => {
+    // XFF = "<spoof>, <real client>, <inner proxy>". With 2 trusted proxies the
+    // last 2 entries were appended by our infra, so the real client is 2nd-from-right.
+    const req = reqWith({ "x-forwarded-for": "9.9.9.9, 2.2.2.2, 3.3.3.3" });
+    expect(clientIp(req, 2)).toBe("2.2.2.2");
+  });
+
+  it("prefers cf-connecting-ip over a spoofable XFF", () => {
+    const req = reqWith({ "cf-connecting-ip": "4.4.4.4", "x-forwarded-for": "evil, 5.5.5.5" });
+    expect(clientIp(req, 1)).toBe("4.4.4.4");
+  });
+
+  it("with no trusted proxy (0 hops), forwarded headers are untrusted → 'unknown'", () => {
+    const req = reqWith({ "x-forwarded-for": "1.2.3.4", "cf-connecting-ip": "5.6.7.8" });
+    expect(clientIp(req, 0)).toBe("unknown");
+  });
+
+  it("falls back to x-real-ip when XFF is absent", () => {
+    expect(clientIp(reqWith({ "x-real-ip": "7.7.7.7" }), 1)).toBe("7.7.7.7");
   });
 
   it("falls back to 'unknown' with no proxy headers", () => {
-    expect(clientIp(new Request("http://x/"))).toBe("unknown");
+    expect(clientIp(reqWith({}), 1)).toBe("unknown");
   });
 });

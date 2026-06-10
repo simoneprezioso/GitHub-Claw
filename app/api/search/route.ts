@@ -52,6 +52,10 @@ export async function POST(req: Request): Promise<Response> {
   // Per-user token (sent via header so it never lands in URLs/logs/body). Falls
   // back to the server's token. Lets a user lift their own rate limit without
   // the server operator sharing one PAT across everyone.
+  //
+  // SECURITY: this value is a user secret. It must only ever be forwarded to the
+  // GitHub API (lib/github, lib/readme). Never log it, echo it in an error
+  // response, or persist it — the UI promises exactly that to the user.
   const token = req.headers.get("x-github-token")?.trim() || process.env.GITHUB_TOKEN || undefined;
 
   // ─── 2. Cache check (query-only key: results no longer depend on filters,

@@ -8,6 +8,7 @@ import {
   clamp,
   monthsSince,
   formatNumber,
+  safeHttpUrl,
 } from "@/lib/utils";
 
 describe("cx", () => {
@@ -97,5 +98,24 @@ describe("formatNumber", () => {
   it("returns small numbers unchanged", () => {
     expect(formatNumber(42)).toBe("42");
     expect(formatNumber(999)).toBe("999");
+  });
+});
+
+describe("safeHttpUrl", () => {
+  it("passes through http and https URLs", () => {
+    expect(safeHttpUrl("https://example.com")).toBe("https://example.com");
+    expect(safeHttpUrl("http://example.com/x")).toBe("http://example.com/x");
+    expect(safeHttpUrl("HTTPS://EXAMPLE.COM")).toBe("HTTPS://EXAMPLE.COM");
+  });
+  it("rejects dangerous and non-http schemes", () => {
+    expect(safeHttpUrl("javascript:alert(1)")).toBeNull();
+    expect(safeHttpUrl("data:text/html,<script>")).toBeNull();
+    expect(safeHttpUrl("ftp://example.com")).toBeNull();
+    expect(safeHttpUrl("//evil.com")).toBeNull();
+  });
+  it("treats null/empty as null", () => {
+    expect(safeHttpUrl(null)).toBeNull();
+    expect(safeHttpUrl(undefined)).toBeNull();
+    expect(safeHttpUrl("")).toBeNull();
   });
 });
