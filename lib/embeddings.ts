@@ -1,7 +1,7 @@
 // Optional embedding-based reranker, env-gated by ENABLE_EMBEDDING_RERANK=1.
 //
-// Uses @xenova/transformers (transformers.js) running locally — no API key
-// required. The model is `Xenova/all-MiniLM-L6-v2`, 384-dim sentence
+// Uses @huggingface/transformers (transformers.js v3) running locally — no API
+// key required. The model is `Xenova/all-MiniLM-L6-v2`, 384-dim sentence
 // embeddings, ~25MB, downloaded on first use and then cached on disk by
 // transformers.js itself.
 //
@@ -53,7 +53,7 @@ async function getPipeline(): Promise<FeatureExtractor> {
     pipelinePromise = (async () => {
       // Dynamic import keeps the heavy ONNX runtime out of the build graph
       // when the feature is disabled.
-      const mod = await import("@xenova/transformers");
+      const mod = await import("@huggingface/transformers");
       // transformers.js exposes `env` to configure model loading.
       if (mod.env) {
         // Bundle the model in your image and set TRANSFORMERS_MODEL_PATH to the
@@ -70,6 +70,9 @@ async function getPipeline(): Promise<FeatureExtractor> {
       const extractor = (await mod.pipeline(
         "feature-extraction",
         "Xenova/all-MiniLM-L6-v2",
+        // v2 quantized by default; v3 defaults to fp32. q8 keeps the ~25MB
+        // download and matches the embeddings this app has always produced.
+        { dtype: "q8" },
       )) as unknown as FeatureExtractor;
       return extractor;
     })();

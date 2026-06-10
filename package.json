@@ -15,24 +15,24 @@
     "mcp": "tsx scripts/claw-mcp.mts"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@xenova/transformers": "^2.17.2",
-    "next": "^16.2.6",
+    "next": "^16.2.9",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
     "@types/node": "20.14.10",
-    "tsx": "^4.22.4",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
-    "@vitest/coverage-v8": "^2.1.4",
+    "@vitest/coverage-v8": "^4.1.8",
     "autoprefixer": "10.4.20",
     "eslint": "^9.14.0",
-    "eslint-config-next": "^16.2.6",
-    "postcss": "8.4.47",
+    "eslint-config-next": "^16.2.9",
+    "postcss": "^8.5.15",
     "tailwindcss": "3.4.13",
+    "tsx": "^4.22.4",
     "typescript": "5.5.4",
-    "vitest": "^2.1.4"
+    "vitest": "^4.1.8"
   }
 }
