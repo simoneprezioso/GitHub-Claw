@@ -51,16 +51,31 @@ describe("blend", () => {
 });
 
 describe("embeddingsEnabled", () => {
-  it("returns true only when the env var equals '1'", () => {
-    const prev = process.env.ENABLE_EMBEDDING_RERANK;
-    process.env.ENABLE_EMBEDDING_RERANK = "1";
+  it("is ON by default and opts out via DISABLE_EMBEDDING_RERANK (or legacy =0)", () => {
+    const prevEnable = process.env.ENABLE_EMBEDDING_RERANK;
+    const prevDisable = process.env.DISABLE_EMBEDDING_RERANK;
+    delete process.env.ENABLE_EMBEDDING_RERANK;
+    delete process.env.DISABLE_EMBEDDING_RERANK;
+
+    // Default: on (hybrid retrieval is the modern expectation; heuristic is the floor).
     expect(embeddingsEnabled()).toBe(true);
+
+    // Explicit opt-out.
+    process.env.DISABLE_EMBEDDING_RERANK = "1";
+    expect(embeddingsEnabled()).toBe(false);
+    delete process.env.DISABLE_EMBEDDING_RERANK;
+
+    // Legacy opt-out.
     process.env.ENABLE_EMBEDDING_RERANK = "0";
     expect(embeddingsEnabled()).toBe(false);
-    process.env.ENABLE_EMBEDDING_RERANK = "true";
-    // We intentionally accept only "1" to keep the toggle unambiguous.
-    expect(embeddingsEnabled()).toBe(false);
-    if (prev === undefined) delete process.env.ENABLE_EMBEDDING_RERANK;
-    else process.env.ENABLE_EMBEDDING_RERANK = prev;
+
+    // Any other value leaves it on.
+    process.env.ENABLE_EMBEDDING_RERANK = "1";
+    expect(embeddingsEnabled()).toBe(true);
+
+    if (prevEnable === undefined) delete process.env.ENABLE_EMBEDDING_RERANK;
+    else process.env.ENABLE_EMBEDDING_RERANK = prevEnable;
+    if (prevDisable === undefined) delete process.env.DISABLE_EMBEDDING_RERANK;
+    else process.env.DISABLE_EMBEDDING_RERANK = prevDisable;
   });
 });

@@ -49,6 +49,7 @@ export function SearchBox({ value, onChange, onSubmit, loading, autoFocus, compa
           }
         }}
         placeholder="Describe a tool, app, library, or project…"
+        aria-label="Describe the open-source project you're looking for"
         rows={1}
         spellCheck
         className={cx(

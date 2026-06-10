@@ -70,6 +70,15 @@ describe("expandQuery — alternative / clone patterns", () => {
     const e = expandQuery("excalidraw clone in vue");
     expect(e.expansionTerms.map((t) => t.toLowerCase())).toContain("excalidraw");
   });
+
+  it("'alternative to X' captures ONLY the product token, not the trailing phrase", () => {
+    const e = expandQuery("a self-hosted alternative to Notion for my team");
+    // Captures just "notion"…
+    expect(e.expansionTerms.map((t) => t.toLowerCase())).toContain("notion");
+    expect(e.searchQueries.some((q) => q.includes("notion alternative"))).toBe(true);
+    // …and never builds a query around the over-captured phrase (the old bug).
+    expect(e.searchQueries.some((q) => q.toLowerCase().includes("notion for my team"))).toBe(false);
+  });
 });
 
 describe("expandQuery — trigger matching is plural-tolerant", () => {

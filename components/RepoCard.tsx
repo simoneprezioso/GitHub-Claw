@@ -1,12 +1,24 @@
 "use client";
 
-import { useState } from "react";
-import type { RankedRepo, HealthBadge } from "@/lib/types";
+import { useId, useState } from "react";
+import type { RankedRepo, HealthBadge, MaintenanceVerdict } from "@/lib/types";
 import { cx, formatNumber, relativeTime } from "@/lib/utils";
 
 interface Props {
   repo: RankedRepo;
 }
+
+const VERDICT_STYLES: Record<MaintenanceVerdict, string> = {
+  Adopt: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  Risky: "bg-amber-50 text-amber-700 ring-amber-200",
+  Abandoned: "bg-red-50 text-red-700 ring-red-200",
+};
+
+const VERDICT_ICON: Record<MaintenanceVerdict, string> = {
+  Adopt: "✓",
+  Risky: "!",
+  Abandoned: "✕",
+};
 
 const BADGE_STYLES: Record<HealthBadge, string> = {
   "Active": "bg-emerald-50 text-emerald-700 ring-emerald-200",
@@ -23,6 +35,7 @@ const BADGE_STYLES: Record<HealthBadge, string> = {
 
 export function RepoCard({ repo }: Props) {
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const breakdownId = useId();
 
   return (
     <article className="group rounded-xl border border-ink-200 bg-white p-5 shadow-card transition hover:border-ink-300">
@@ -37,20 +50,29 @@ export function RepoCard({ repo }: Props) {
             >
               {repo.owner}/<span className="text-ink-900">{repo.name}</span>
             </a>
-            {repo.fork && <span className="text-xs text-ink-400">forked</span>}
-            {repo.archived && <span className="text-xs text-red-600">archived</span>}
+            <VerdictBadge maintenance={repo.maintenance} />
           </div>
           {repo.description ? (
             <p className="mt-1.5 text-sm text-ink-600">{repo.description}</p>
           ) : (
             <p className="mt-1.5 text-sm italic text-ink-400">No description provided.</p>
           )}
+          {repo.maintenance.reasons.length > 0 && (
+            <p className="mt-1 text-xs text-ink-500">{repo.maintenance.reasons.join(" · ")}</p>
+          )}
         </div>
-        <ScorePill score={repo.score} onClick={() => setShowBreakdown((v) => !v)} active={showBreakdown} />
+        <ScorePill
+          score={repo.score}
+          onClick={() => setShowBreakdown((v) => !v)}
+          active={showBreakdown}
+          controls={breakdownId}
+        />
       </header>
 
       {showBreakdown && (
-        <BreakdownPanel breakdown={repo.scoreBreakdown} />
+        <div id={breakdownId}>
+          <BreakdownPanel breakdown={repo.scoreBreakdown} />
+        </div>
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-ink-500">
@@ -139,14 +161,33 @@ export function RepoCard({ repo }: Props) {
   );
 }
 
+// Live-metadata maintenance verdict — the headline "can I rely on this?" signal.
+// Reasons are exposed both visually (under the description) and via the title.
+function VerdictBadge({ maintenance }: { maintenance: RankedRepo["maintenance"] }) {
+  return (
+    <span
+      title={maintenance.reasons.join(" · ")}
+      className={cx(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1",
+        VERDICT_STYLES[maintenance.verdict],
+      )}
+    >
+      <span aria-hidden>{VERDICT_ICON[maintenance.verdict]}</span>
+      {maintenance.verdict}
+    </span>
+  );
+}
+
 function ScorePill({
   score,
   onClick,
   active,
+  controls,
 }: {
   score: number;
   onClick: () => void;
   active: boolean;
+  controls: string;
 }) {
   const color =
     score >= 75
@@ -160,6 +201,9 @@ function ScorePill({
     <button
       type="button"
       onClick={onClick}
+      aria-expanded={active}
+      aria-controls={controls}
+      aria-label={`Match score ${score} out of 100. ${active ? "Hide" : "Show"} the score breakdown.`}
       title={active ? "Hide score breakdown" : "Show score breakdown"}
       className={cx(
         "flex shrink-0 flex-col items-center rounded-lg px-2.5 py-1.5 ring-1 transition",

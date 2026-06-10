@@ -40,6 +40,14 @@ export function uniq<T>(items: T[]): T[] {
   return Array.from(new Set(items));
 }
 
+// Return the URL only if it's a plain http(s) link, else null. Guards against
+// `javascript:`/`data:` and other scheme injection from upstream metadata that
+// we render straight into href attributes.
+export function safeHttpUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  return /^https?:\/\//i.test(u) ? u : null;
+}
+
 // Cap a number to 1 decimal place for display / breakdown values.
 export function round1(n: number): number {
   return Math.round(n * 10) / 10;

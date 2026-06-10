@@ -5,12 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { SearchBox } from "@/components/SearchBox";
 import { ResultsList } from "@/components/ResultsList";
 import { FiltersBar } from "@/components/FiltersBar";
-import { uniqueLanguages } from "@/lib/ranking";
+import { TokenSettings } from "@/components/TokenSettings";
+import { applyClientFilters, uniqueLanguages } from "@/lib/ranking";
 import type {
   SearchFilters,
   SortMode,
   SearchResponse,
   SearchErrorResponse,
+  MaintenanceVerdict,
 } from "@/lib/types";
 import { cx } from "@/lib/utils";
 
@@ -21,6 +23,8 @@ const EXAMPLES = [
   "CLI that records terminal sessions as GIFs",
   "AI browser agent framework with Playwright",
 ];
+
+const TOKEN_STORAGE_KEY = "claw_gh_token";
 
 const DEFAULT_FILTERS: SearchFilters = {
   hideArchived: true,
@@ -39,7 +43,6 @@ function filtersToParams(query: string, f: SearchFilters): URLSearchParams {
   if (query) params.set("q", query);
   if (f.sort !== DEFAULT_FILTERS.sort) params.set("sort", f.sort);
   if (f.language) params.set("lang", f.language);
-  // Toggles: serialize only when they differ from the default.
   if (f.hideArchived !== DEFAULT_FILTERS.hideArchived) {
     params.set("archived", f.hideArchived ? "0" : "1");
   }
@@ -90,8 +93,6 @@ export function HomeClient() {
   const initial = useMemo(() => {
     const parsed = parseFilters(new URLSearchParams(searchParams.toString()));
     return parsed;
-    // We intentionally do NOT depend on searchParams here; subsequent URL
-    // changes are driven by user actions and re-fired through runSearch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -99,6 +100,30 @@ export function HomeClient() {
   const [filters, setFilters] = useState<SearchFilters>(initial.filters);
   const [state, setState] = useState<SearchState>(INITIAL_STATE);
   const [copied, setCopied] = useState(false);
+  const [userToken, setUserToken] = useState<string | null>(null);
+
+  // Load any saved per-user token once on mount. We read localStorage in an
+  // effect (not a lazy initializer) so the SSR and first client render agree —
+  // the token affects rendered text, so a lazy initializer would mismatch.
+  useEffect(() => {
+    try {
+      const t = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- canonical post-mount localStorage read
+      if (t) setUserToken(t);
+    } catch {
+      /* private mode / blocked storage — ignore */
+    }
+  }, []);
+
+  const handleTokenChange = useCallback((t: string | null) => {
+    setUserToken(t);
+    try {
+      if (t) window.localStorage.setItem(TOKEN_STORAGE_KEY, t);
+      else window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   // Push current query+filters to the URL without adding a history entry.
   const syncUrl = useCallback(
@@ -110,6 +135,8 @@ export function HomeClient() {
     [router],
   );
 
+  // A search hits the network. Filter/sort changes do NOT — they're applied
+  // client-side over the already-fetched result set (see displayedResults).
   const runSearch = useCallback(
     async (queryArg: string, filtersArg: SearchFilters) => {
       const query = queryArg.trim();
@@ -117,10 +144,12 @@ export function HomeClient() {
       syncUrl(query, filtersArg);
       setState((s) => ({ ...s, query, loading: true, error: null }));
       try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (userToken) headers["x-github-token"] = userToken;
         const res = await fetch("/api/search", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, filters: filtersArg }),
+          headers,
+          body: JSON.stringify({ query }),
         });
         const json = (await res.json()) as SearchResponse | SearchErrorResponse;
         if (!res.ok) {
@@ -137,12 +166,10 @@ export function HomeClient() {
         });
       }
     },
-    [syncUrl],
+    [syncUrl, userToken],
   );
 
-  // Auto-run an initial search if the URL had a `q`. We defer to a microtask
-  // so React doesn't see a synchronous setState during effect commit (which
-  // newer react-hooks lint rules — correctly — flag as cascading renders).
+  // Auto-run an initial search if the URL had a `q`.
   const didAutoRun = useRef(false);
   useEffect(() => {
     if (didAutoRun.current) return;
@@ -153,10 +180,10 @@ export function HomeClient() {
     }
   }, [initial.query, initial.filters, runSearch]);
 
+  // Filter/sort changes are now FREE — just update state + URL, no re-fetch.
   const handleFilterChange = (next: SearchFilters) => {
     setFilters(next);
-    if (state.query) runSearch(state.query, next);
-    else syncUrl(input, next); // keep URL in sync even before first search
+    syncUrl(state.query || input, next);
   };
 
   const handleSubmit = () => runSearch(input, filters);
@@ -167,21 +194,26 @@ export function HomeClient() {
   };
 
   const handleCopyLink = async () => {
-    const url = new URL(window.location.href);
+    // Build the link from current state rather than window.location, which can
+    // lag router.replace by a tick.
+    const qs = filtersToParams(state.query || input, filters).toString();
+    const url = `${window.location.origin}/${qs ? `?${qs}` : ""}`;
     try {
-      await navigator.clipboard.writeText(url.toString());
+      await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Older browsers / non-secure contexts: fall back to selecting the URL bar.
-      window.prompt("Copy this link", url.toString());
+      window.prompt("Copy this link", url);
     }
   };
 
-  const languages = useMemo(
-    () => (state.data ? uniqueLanguages(state.data.results) : []),
-    [state.data],
+  const allResults = useMemo(() => state.data?.results ?? [], [state.data]);
+  const displayedResults = useMemo(
+    () => applyClientFilters(allResults, filters),
+    [allResults, filters],
   );
+  const languages = useMemo(() => uniqueLanguages(allResults), [allResults]);
+  const verdictCounts = useMemo(() => countVerdicts(displayedResults), [displayedResults]);
 
   const filtersActive =
     filters.hideArchived ||
@@ -206,7 +238,7 @@ export function HomeClient() {
 
       {!hasResults && (
         <section aria-label="Example searches" className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
+          <p className="text-xs font-medium uppercase tracking-wide text-ink-500">
             Try an example
           </p>
           <ul className="flex flex-wrap gap-2">
@@ -221,6 +253,7 @@ export function HomeClient() {
               </li>
             ))}
           </ul>
+          <TokenSettings token={userToken} onChange={handleTokenChange} />
         </section>
       )}
 
@@ -229,7 +262,7 @@ export function HomeClient() {
           <div className="space-y-2">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-wide text-ink-400">Searching for</p>
+                <p className="text-xs uppercase tracking-wide text-ink-500">Searching for</p>
                 <p className="break-words text-sm text-ink-900">“{state.query}”</p>
               </div>
               {state.data && (
@@ -264,26 +297,34 @@ export function HomeClient() {
             <WarningsPanel warnings={state.data.meta.warnings} />
           )}
 
+          {state.data && displayedResults.length > 0 && (
+            <VerdictSummary counts={verdictCounts} reranked={state.data.meta.reranked ?? false} />
+          )}
+
           {(state.data || state.loading) && !state.error && (
             <FiltersBar
               filters={filters}
               onChange={handleFilterChange}
               languages={languages}
-              totalResults={state.data?.results.length ?? 0}
+              totalResults={displayedResults.length}
             />
           )}
 
-          {!state.error && (
-            <ResultsList
-              results={state.data?.results ?? []}
-              loading={state.loading}
-              filtersActive={filtersActive}
-            />
-          )}
+          {/* aria-live region so screen readers hear results / loading / empty changes. */}
+          <div aria-live="polite" aria-busy={state.loading}>
+            {!state.error && (
+              <ResultsList
+                results={displayedResults}
+                loading={state.loading}
+                filtersActive={filtersActive}
+              />
+            )}
+          </div>
 
           {state.data && (
             <MetaFooter
               candidates={state.data.meta.candidateCount}
+              shown={displayedResults.length}
               deduped={state.data.meta.dedupedCount}
               rateLimit={state.data.meta.rateLimitRemaining}
               cached={state.data.meta.cached ?? false}
@@ -297,6 +338,12 @@ export function HomeClient() {
   );
 }
 
+function countVerdicts(results: { maintenance: { verdict: MaintenanceVerdict } }[]) {
+  const counts: Record<MaintenanceVerdict, number> = { Adopt: 0, Risky: 0, Abandoned: 0 };
+  for (const r of results) counts[r.maintenance.verdict]++;
+  return counts;
+}
+
 function Header({ compact }: { compact: boolean }) {
   return (
     <header className={cx("space-y-3 text-center", compact ? "" : "pt-4")}>
@@ -307,12 +354,13 @@ function Header({ compact }: { compact: boolean }) {
       {!compact && (
         <>
           <p className="mx-auto max-w-xl text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl">
-            Find open-source projects from an idea, not keywords.
+            Real open-source projects for your idea — verified, never invented.
           </p>
           <p className="mx-auto max-w-xl text-sm text-ink-500">
-            Describe a tool, app, library, or project in plain English. GitHub Claw
-            expands your idea into search queries and ranks real repositories by
-            relevance, popularity, freshness, and health.
+            Describe a tool in plain English. Every result is a live GitHub repository
+            pulled straight from the API — with a transparent match score and an honest
+            <span className="font-medium text-ink-700"> Adopt / Risky / Abandoned </span>
+            verdict. No hallucinated repos, no dead links.
           </p>
         </>
       )}
@@ -320,13 +368,46 @@ function Header({ compact }: { compact: boolean }) {
   );
 }
 
+function VerdictSummary({
+  counts,
+  reranked,
+}: {
+  counts: Record<MaintenanceVerdict, number>;
+  reranked: boolean;
+}) {
+  const items: Array<[MaintenanceVerdict, string]> = [
+    ["Adopt", "bg-emerald-50 text-emerald-700 ring-emerald-200"],
+    ["Risky", "bg-amber-50 text-amber-700 ring-amber-200"],
+    ["Abandoned", "bg-ink-100 text-ink-500 ring-ink-200"],
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+      {items.map(([v, cls]) =>
+        counts[v] > 0 ? (
+          <span key={v} className={cx("rounded-full px-2 py-0.5 font-medium ring-1", cls)}>
+            {counts[v]} {v}
+          </span>
+        ) : null,
+      )}
+      {reranked && (
+        <span
+          className="rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700 ring-1 ring-sky-200"
+          title="Results were re-ordered by a local semantic (embedding) reranker on top of the heuristic score."
+        >
+          semantic rerank
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ErrorPanel({ error }: { error: SearchErrorResponse }) {
   return (
-    <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+    <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
       <p className="font-medium">{error.error}</p>
-      {error.hint && <p className="mt-1 text-red-700/80">{error.hint}</p>}
+      {error.hint && <p className="mt-1 text-red-700/90">{error.hint}</p>}
       {typeof error.rateLimitRemaining === "number" && (
-        <p className="mt-2 text-xs text-red-700/70">
+        <p className="mt-2 text-xs text-red-700/80">
           Rate limit remaining: {error.rateLimitRemaining}
         </p>
       )}
@@ -346,19 +427,21 @@ function WarningsPanel({ warnings }: { warnings: string[] }) {
 
 function MetaFooter({
   candidates,
+  shown,
   deduped,
   rateLimit,
   cached,
 }: {
   candidates: number;
+  shown: number;
   deduped: number;
   rateLimit: number | null;
   cached: boolean;
 }) {
   return (
-    <p className="pt-2 text-center text-[11px] text-ink-400">
-      Fetched {candidates} candidates, ranked top {deduped}
-      {typeof rateLimit === "number" && ` · ${rateLimit} GitHub API calls remaining this hour`}
+    <p className="pt-2 text-center text-[11px] text-ink-500">
+      Scanned {candidates} results · showing {shown} of {deduped} unique repos
+      {typeof rateLimit === "number" && ` · ${rateLimit} GitHub API calls left this hour`}
       {cached && (
         <>
           {" · "}
@@ -373,10 +456,11 @@ function MetaFooter({
 
 function FooterCredit() {
   return (
-    <footer className="mt-auto pt-8 text-center text-[11px] text-ink-400">
+    <footer className="mt-auto pt-8 text-center text-[11px] text-ink-500">
       <p>
-        Built on the GitHub REST API. Not affiliated with GitHub. Ranking is
-        heuristic — see README for details.
+        Built on the GitHub REST API. Not affiliated with GitHub. Every repo shown is
+        real and was live when fetched; scoring and verdicts are heuristic — see the
+        README for details.
       </p>
     </footer>
   );
