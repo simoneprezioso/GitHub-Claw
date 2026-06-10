@@ -10,7 +10,7 @@
 import { runSearchPipeline } from "../lib/searchPipeline";
 import type { RankedRepo, MaintenanceVerdict } from "../lib/types";
 
-const HELP = `GitHub Claw CLI — find real, verified GitHub repos from a plain-English idea.
+const HELP = `GitHub Claw CLI: find real, verified GitHub repos from a plain-English idea.
 
 Usage:
   npm run cli -- [options] "<your idea>"

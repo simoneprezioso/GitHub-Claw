@@ -24,7 +24,7 @@ export function TokenSettings({ token, onChange }: Props) {
         <p className="text-ink-600">
           Optional. A token raises your GitHub limit from 60 to 5,000 requests/hour. It’s
           stored only in this browser and sent over HTTPS with each search, used only to
-          call GitHub on your behalf — never stored or logged on the server. A classic
+          call GitHub on your behalf, never stored or logged on the server. A classic
           token with <em>no scopes</em> is enough for public search.
         </p>
         <div className="flex flex-wrap items-center gap-2">

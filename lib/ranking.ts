@@ -209,7 +209,7 @@ function buildBadges(repo: GitHubRepo, flags: { tutorial: boolean; awesome: bool
 function buildWarnings(repo: GitHubRepo, flags: { tutorial: boolean; awesome: boolean }): string[] {
   const w: string[] = [];
   if (repo.archived) w.push("This repository is archived and no longer maintained.");
-  if (repo.fork) w.push("This is a fork — the original may be a better starting point.");
+  if (repo.fork) w.push("This is a fork; the original may be a better starting point.");
   if (flags.awesome) w.push("Looks like an awesome-list, not an actual project.");
   if (flags.tutorial) w.push("Name/description suggests a tutorial, demo, or starter rather than a product.");
   if (monthsSince(repo.pushed_at) > 24 && !repo.archived) w.push("No commits in over 2 years.");
@@ -231,7 +231,7 @@ function assessMaintenance(
 
   // Abandoned — hard stops.
   if (repo.archived) {
-    return { verdict: "Abandoned", reasons: ["Archived by its owner — read-only"] };
+    return { verdict: "Abandoned", reasons: ["Archived by its owner (read-only)"] };
   }
   if (isFinite(months) && months > 24) {
     return { verdict: "Abandoned", reasons: ["No commits in over 2 years"] };
@@ -241,7 +241,7 @@ function assessMaintenance(
   const risky: string[] = [];
   if (isFinite(months) && months > 12) risky.push("No commits in over a year");
   if (repo.fork) risky.push("This is a fork, not the upstream project");
-  if (!hasLicense) risky.push("No open-source license — usage rights unclear");
+  if (!hasLicense) risky.push("No open-source license; usage rights unclear");
   if (flags.awesome) risky.push("Looks like a curated list, not a usable project");
   if (flags.tutorial) risky.push("Looks like a tutorial/demo, not a product");
   if (risky.length > 0) return { verdict: "Risky", reasons: risky };
