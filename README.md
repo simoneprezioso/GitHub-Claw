@@ -2,9 +2,20 @@
 
 > Real open-source projects for your idea — verified, scored, and triaged. Never invented.
 
-Ask an LLM "find me an open-source Typeform alternative in React" and it will happily invent a repo, link a dead URL, or quote a star count from two years ago. **GitHub Claw won't.** You describe a tool in plain English; it expands the idea into targeted GitHub searches, ranks the *real, currently-live* repositories it finds, and tells you straight up whether each one is safe to **Adopt**, **Risky**, or **Abandoned** — every signal pulled from the GitHub API at request time, nothing fabricated.
+[![Stars](https://img.shields.io/github/stars/simoneprezioso/GitHub-Claw?style=flat&logo=github)](https://github.com/simoneprezioso/GitHub-Claw/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/simoneprezioso/GitHub-Claw)](https://github.com/simoneprezioso/GitHub-Claw/commits)
+[![License](https://img.shields.io/github/license/simoneprezioso/GitHub-Claw)](LICENSE)
+![Node](https://img.shields.io/badge/node-%E2%89%A518.17-blue?logo=node.js&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![Tests](https://img.shields.io/badge/tests-passing-brightgreen?logo=vitest&logoColor=white)
+![MCP](https://img.shields.io/badge/MCP-compatible-7c3aed)
+
+Ask an LLM "find me an open-source Typeform alternative in React" and it will happily invent a repo, link a dead URL, or quote a star count from two years ago. **GitHub Claw won't.** You describe a tool in plain English; it expands your idea into targeted GitHub searches, ranks the *real, currently-live* repositories it finds, and tells you straight up whether each one is safe to **Adopt**, **Risky**, or **Abandoned** — every signal pulled from the GitHub API at request time, nothing fabricated.
 
 It's a search engine, not a chatbot. No accounts, no billing, no LLM API.
+
+<!-- Replace with a real screenshot or GIF of the running UI — save it to docs/demo.png -->
+![GitHub Claw — plain-English repo search with live Adopt / Risky / Abandoned verdicts](docs/demo.png)
 
 ---
 
@@ -19,13 +30,45 @@ The thing a hallucination-prone assistant *structurally cannot promise* is the t
 
 ---
 
+## In action
+
+You type a plain-English idea — say:
+
+```
+CLI that records terminal sessions as GIFs
+```
+
+Claw fans it out into parallel GitHub searches. Notice it injected `asciinema` on its own — you never typed it:
+
+```
+cli records terminal sessions gifs in:name,description,readme stars:>5
+"terminal recording" OR asciinema OR "tty recorder" OR "terminal gif" OR "shell recording" in:name,description stars:>5
+topic:terminal cli records stars:>5
+```
+
+…then dedupes ~190 candidates, scores the whole pool, fetches the top READMEs, reranks, and hands back:
+
+| # | Score | Repo | Stars | Verdict |
+|---|---|---|---|---|
+| 1 | **61** | [asciinema/asciinema](https://github.com/asciinema/asciinema) | 17.4k ★ | Adopt |
+| 2 | **55** | [icholy/ttygif](https://github.com/icholy/ttygif) | 4.0k ★ | Adopt |
+| 3 | **50** | [asciinema/asciinema-player](https://github.com/asciinema/asciinema-player) | 2.9k ★ | Adopt |
+
+You never typed "asciinema" — synonym expansion and topic mapping did. (`asciinema/agg`, the GIF generator itself, lands right behind at #4.)
+
+> <sub>Live figures from a smoke run on 2026-06-10 with the semantic reranker on. Stars and scores drift over time — the durable point is that the *names* came from your idea, not your keywords.</sub>
+
+---
+
 ## Features
 
+Beyond the four promises above, here's what's in the box:
+
 - **Plain-English search** — describe a tool, app, library, or project in your own words.
-- **Adopt / Risky / Abandoned verdict** — a live-metadata maintenance triage on every result, plus a summary tally above the list.
-- **Deterministic query expansion** — ~55 hand-curated categories (forms, notion-likes, terminal recorders, kanban, mesh VPN, vector DBs, …), `"X alternative"` / `"X clone"` detection, tech-stack hints, and modifiers (*self-hosted*, *local-first*) — pure TypeScript, no LLM.
+- **Verdict tally** — beyond the per-repo Adopt / Risky / Abandoned badge, a summary count sits above the result list so you can triage a whole search at a glance.
+- **Deterministic query expansion** — 58 hand-curated categories (forms, notion-likes, terminal recorders, kanban, mesh VPN, vector DBs, …), `"X alternative"` / `"X clone"` detection, tech-stack hints, and modifiers (*self-hosted*, *local-first*) — pure TypeScript, no LLM.
 - **Hybrid ranking** — a transparent 0–100 score per repo. The **entire deduped candidate pool** is scored (we no longer pre-filter by stars, which used to delete niche exact matches before ranking).
-- **Semantic reranker, on by default** — the top heuristic candidates are re-ordered by cosine similarity from a local 25 MB sentence-transformer (`Xenova/all-MiniLM-L6-v2`). Runs locally, no API key; the deterministic path stays the floor and is used automatically if the model can't load. Opt out with `DISABLE_EMBEDDING_RERANK=1`.
+- **Semantic reranker, on by default** — the top heuristic candidates are re-ordered by cosine similarity from a local 25 MB sentence-transformer (`Xenova/all-MiniLM-L6-v2`, run via [`@huggingface/transformers`](https://github.com/huggingface/transformers.js) — transformers.js v3). No API key; the deterministic path stays the floor and is used automatically if the model can't load. Opt out with `DISABLE_EMBEDDING_RERANK=1`.
 - **Instant filters & sort** — language picker, sort, and archived/fork/tutorial toggles are applied **client-side** over the fetched set, so they're instant and cost **zero** extra GitHub calls.
 - **Bring-your-own token** — paste your own GitHub token in the UI (stored only in your browser, sent per-request via header) to lift your rate limit without the operator sharing one PAT.
 - **Abuse-resistant API** — per-IP rate limiting, a global outbound-concurrency cap, and in-flight request coalescing protect the shared token from a thundering herd.
@@ -45,7 +88,7 @@ The thing a hallucination-prone assistant *structurally cannot promise* is the t
 ### Install and run
 
 ```bash
-npm install --legacy-peer-deps    # eslint-config-next@16 + eslint@9 peer ranges are strict
+npm install                        # if you hit peer-dep errors, re-run with --legacy-peer-deps
 cp .env.example .env.local         # then paste your token after GITHUB_TOKEN=
 npm run dev                        # → http://localhost:3000
 ```
@@ -71,6 +114,8 @@ npm run mcp          # start the MCP server (stdio) for coding agents
 | `GITHUB_TOKEN` | No | Server-side GitHub PAT. Without it, unauthenticated requests are limited to 60/hour per IP. Users can also supply their own token in the UI. |
 | `DISABLE_EMBEDDING_RERANK` | No | Set to `"1"` to turn the semantic reranker **off** (it's on by default). `ENABLE_EMBEDDING_RERANK=0` also works. |
 | `TRANSFORMERS_MODEL_PATH` | No | Directory containing a bundled copy of the embedding model. Set it to skip the ~25 MB download on cold start (recommended for serverless/Docker). |
+| `TRUSTED_PROXY_HOPS` | No | Number of trusted reverse proxies in front of the app (default `1`). Decides which `X-Forwarded-For` entry the per-IP rate limiter treats as the client. Match it to your deployment: set `0` for a directly-exposed origin (forwarded headers become untrusted); a value that's too high lets a client spoof its IP and bypass the limit. |
+| `RATE_LIMIT_SINGLE_INSTANCE_ACK` | No | Set to `"1"` to silence the one-time production warning that the rate limiter is in-process (and therefore per-instance). Set it on a single long-lived instance, or once a shared store backs the limiter. |
 
 ---
 
@@ -161,7 +206,7 @@ Re-scoped to avoid false positives: we no longer match a bare `awesome` (it nuke
 
 ## Known limitations
 
-- **GitHub API rate limits.** ~9 calls per uncached search. Without a token: 60/hr per IP. The in-process rate limiter, outbound semaphore, and request coalescing protect the shared token, but a hosted multi-user deployment should move to **per-user OAuth / a GitHub App** (5,000/hr per installation) — the per-user token field in the UI is the first step toward that.
+- **GitHub API rate limits.** ~9 calls per uncached search. Without a token: 60/hr per IP. The in-process rate limiter, outbound semaphore, and request coalescing protect the shared token, but a hosted multi-user deployment should move to **per-user OAuth / a GitHub App** (5,000/hr per installation) — the per-user token field in the UI is the first step toward that. The per-IP limiter keys on a client IP derived from trusted-proxy headers, so set **`TRUSTED_PROXY_HOPS`** to match your topology — otherwise a client can spoof `X-Forwarded-For` and slip the limit.
 - **In-memory limits/cache are single-instance.** The token bucket, coalescing map, embedding-vector cache, and JSON file cache live in process memory; on multi-instance or serverless deployments, back the limiter with Redis/Upstash and expect the file cache to be per-instance (and read-only on some platforms).
 - **Embedding model cold start.** First search after boot loads the 25 MB model. Bundle it and set `TRANSFORMERS_MODEL_PATH` to avoid re-downloading on every cold start.
 - **No full-code indexing.** We read metadata + README excerpts, not source code.
