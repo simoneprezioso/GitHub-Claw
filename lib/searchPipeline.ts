@@ -37,7 +37,7 @@ export async function runSearchPipeline(
   const warnings: string[] = [];
   if (!opts.token) {
     warnings.push(
-      "Running without a GitHub token — rate limit is 60 requests/hour per IP. Add a token for reliable results.",
+      "Running without a GitHub token: rate limit is 60 requests/hour per IP. Add a token for reliable results.",
     );
   }
 
@@ -48,7 +48,7 @@ export async function runSearchPipeline(
 
   if (searchResult.failedQueries.length > 0) {
     warnings.push(
-      `${searchResult.failedQueries.length} of ${expanded.searchQueries.length} sub-queries failed — results may be incomplete.`,
+      `${searchResult.failedQueries.length} of ${expanded.searchQueries.length} sub-queries failed; results may be incomplete.`,
     );
   }
 
@@ -85,7 +85,7 @@ export async function runSearchPipeline(
       reranked = true;
     } catch (err) {
       warnings.push(
-        `Embedding reranker unavailable — using heuristic ranking. (${
+        `Embedding reranker unavailable; using heuristic ranking. (${
           err instanceof Error ? err.message : "unknown"
         })`,
       );

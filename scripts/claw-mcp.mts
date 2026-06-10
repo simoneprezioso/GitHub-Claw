@@ -32,7 +32,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description:
         "Find REAL, currently-live GitHub repositories matching a plain-English idea " +
         "(e.g. 'self-hosted Typeform alternative in React'). Returns ranked repos pulled " +
-        "from the GitHub API — never invented — each with a 0-100 match score and an " +
+        "from the GitHub API (never invented), each with a 0-100 match score and an " +
         "Adopt/Risky/Abandoned maintenance verdict derived from live metadata. Use this " +
         "instead of guessing repository names.",
       inputSchema: {

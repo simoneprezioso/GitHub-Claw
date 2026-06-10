@@ -354,11 +354,11 @@ function Header({ compact }: { compact: boolean }) {
       {!compact && (
         <>
           <p className="mx-auto max-w-xl text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl">
-            Real open-source projects for your idea — verified, never invented.
+            Real open-source projects for your idea: verified, never invented.
           </p>
           <p className="mx-auto max-w-xl text-sm text-ink-500">
             Describe a tool in plain English. Every result is a live GitHub repository
-            pulled straight from the API — with a transparent match score and an honest
+            pulled straight from the API, with a transparent match score and an honest
             <span className="font-medium text-ink-700"> Adopt / Risky / Abandoned </span>
             verdict. No hallucinated repos, no dead links.
           </p>
@@ -459,7 +459,7 @@ function FooterCredit() {
     <footer className="mt-auto pt-8 text-center text-[11px] text-ink-500">
       <p>
         Built on the GitHub REST API. Not affiliated with GitHub. Every repo shown is
-        real and was live when fetched; scoring and verdicts are heuristic — see the
+        real and was live when fetched; scoring and verdicts are heuristic. See the
         README for details.
       </p>
     </footer>

@@ -27,7 +27,7 @@ export async function POST(req: Request): Promise<Response> {
     const retryAfter = Math.ceil(rl.retryAfterMs / 1000);
     return NextResponse.json(
       {
-        error: "Too many requests — slow down.",
+        error: "Too many requests. Slow down.",
         hint: `Try again in about ${retryAfter}s.`,
       } satisfies SearchErrorResponse,
       { status: 429, headers: { "Retry-After": String(retryAfter) } },
@@ -89,7 +89,7 @@ export async function POST(req: Request): Promise<Response> {
             : `GitHub API error: ${err.message}`,
           hint: err.rateLimited
             ? token
-              ? "Wait a few minutes — your token's hourly window will reset soon."
+              ? "Wait a few minutes; your token's hourly window will reset soon."
               : "Add a GITHUB_TOKEN (or paste your own token in the UI) to raise the rate limit from 60/hour to 5000/hour."
             : undefined,
           rateLimitRemaining: err.rateLimitRemaining,
