@@ -204,17 +204,6 @@ Re-scoped to avoid false positives: we no longer match a bare `awesome` (it nuke
 
 ---
 
-## Known limitations
-
-- **GitHub API rate limits.** ~9 calls per uncached search. Without a token: 60/hr per IP. The in-process rate limiter, outbound semaphore, and request coalescing protect the shared token, but a hosted multi-user deployment should move to **per-user OAuth / a GitHub App** (5,000/hr per installation) — the per-user token field in the UI is the first step toward that. The per-IP limiter keys on a client IP derived from trusted-proxy headers, so set **`TRUSTED_PROXY_HOPS`** to match your topology — otherwise a client can spoof `X-Forwarded-For` and slip the limit.
-- **In-memory limits/cache are single-instance.** The token bucket, coalescing map, embedding-vector cache, and JSON file cache live in process memory; on multi-instance or serverless deployments, back the limiter with Redis/Upstash and expect the file cache to be per-instance (and read-only on some platforms).
-- **Embedding model cold start.** First search after boot loads the 25 MB model. Bundle it and set `TRANSFORMERS_MODEL_PATH` to avoid re-downloading on every cold start.
-- **No full-code indexing.** We read metadata + README excerpts, not source code.
-- **English-only synonym map.** Non-English queries fall through to plain GitHub search.
-- **Single-token product, not yet multi-tenant.** See the OAuth note above before any public launch.
-
----
-
 ## License
 
-MIT — do what you want, attribution appreciated.
+MIT: do what you want, attribution appreciated
